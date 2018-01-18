@@ -1,7 +1,5 @@
 package com.example.paultikhonov.uklontestapp.model;
 
-import com.example.paultikhonov.uklontestapp.model.Distance;
-import com.example.paultikhonov.uklontestapp.model.Duration;
 import com.google.android.gms.maps.model.LatLng;
 
 import java.util.List;

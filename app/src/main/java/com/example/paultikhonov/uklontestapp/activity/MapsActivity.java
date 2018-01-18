@@ -2,8 +2,11 @@ package com.example.paultikhonov.uklontestapp.activity;
 
 import android.Manifest;
 import android.app.ProgressDialog;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.location.Address;
+import android.location.Geocoder;
 import android.location.Location;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
@@ -17,6 +20,7 @@ import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.example.paultikhonov.uklontestapp.AppDatabase;
 import com.example.paultikhonov.uklontestapp.routers.MainRouter;
 import com.example.paultikhonov.uklontestapp.utils.PermissionUtils;
 import com.example.paultikhonov.uklontestapp.R;
@@ -40,29 +44,40 @@ import com.google.android.gms.maps.model.PolylineOptions;
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
 
+import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class MapsActivity extends AppCompatActivity implements OnMapReadyCallback, DirectionFinderListener {
 
-    private String TAG = MapsActivity.class.getSimpleName();
-
     private static final int LOCATION_PERMISSION_REQUEST_CODE = 1;
+    private static final int ADDRESSES_LIST_ORIGIN_REQUEST_CODE = 2;
+    private static final int ADDRESSES_LIST_DESTINATION_REQUEST_CODE = 3;
+
+    public static final String ADDRESSES_LIST_REQUEST_VALUE = "address";
 
     @NonNull
     private MainRouter mRouter;
 
     private GoogleMap mMap;
     private FusedLocationProviderClient mFusedLocationProviderClient;
-    private Button btnFindPath;
-    private EditText etOrigin;
-    private EditText etDestination;
-    private List<Marker> originMarkers = new ArrayList<>();
-    private List<Marker> destinationMarkers = new ArrayList<>();
-    private List<Polyline> polylinePaths = new ArrayList<>();
-    private ProgressDialog progressDialog;
+    private LatLng mLatLng;
+    private Marker mMarker;
+    private Geocoder mGeocoder;
 
+    private Button mBtnFindPath;
+    private Button mBtnOrigin;
+    private Button mBtnDestination;
+    private EditText mEtOrigin;
+    private EditText mEtDestination;
+
+    private List<Marker> mOriginMarkers = new ArrayList<>();
+    private List<Marker> mDestinationMarkers = new ArrayList<>();
+    private List<Polyline> mPolylinePaths = new ArrayList<>();
+
+    private ProgressDialog mProgressDialog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -74,33 +89,57 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         mFusedLocationProviderClient = LocationServices
                 .getFusedLocationProviderClient(this);
 
+        mGeocoder = new Geocoder(this, Locale.getDefault());
+
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
         mapFragment.getMapAsync(this);
 
-        btnFindPath = (Button) findViewById(R.id.btnFindPath);
-        etOrigin = (EditText) findViewById(R.id.etOrigin);
-        etDestination = (EditText) findViewById(R.id.etDestination);
+        mBtnFindPath = (Button) findViewById(R.id.btnFindPath);
+        mBtnOrigin = (Button) findViewById(R.id.btnOrigin);
+        mBtnDestination = (Button) findViewById(R.id.btnDestination);
+        mEtOrigin = (EditText) findViewById(R.id.etOrigin);
+        mEtDestination = (EditText) findViewById(R.id.etDestination);
 
-        btnFindPath.setOnClickListener(new View.OnClickListener() {
+        mBtnFindPath.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 sendRequest();
             }
         });
 
+        mBtnOrigin.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                mRouter.showAddresses(ADDRESSES_LIST_ORIGIN_REQUEST_CODE);
+            }
+        });
+
+        mBtnDestination.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                mRouter.showAddresses(ADDRESSES_LIST_DESTINATION_REQUEST_CODE);
+            }
+        });
+
+    }
+
+    @Override
+    protected void onDestroy() {
+        AppDatabase.destroyInstance();
+        super.onDestroy();
     }
 
     private void sendRequest() {
-        String origin = etOrigin.getText().toString();
-        String destination = etDestination.getText().toString();
+        String origin = mEtOrigin.getText().toString();
+        String destination = mEtDestination.getText().toString();
         if (origin.isEmpty()) {
-            Toast.makeText(this, "Введите пожалуйста адрес отправления", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, getString(R.string.origin_message), Toast.LENGTH_SHORT).show();
             return;
         }
         if (destination.isEmpty()) {
-            Toast.makeText(this, "Введите пожалуйста пункт назначения", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, getString(R.string.destination_message), Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -128,6 +167,53 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
 
         mMap.setMyLocationEnabled(true);
         getDeviceLocation();
+
+        mMap.setOnMapClickListener(new GoogleMap.OnMapClickListener() {
+
+            @Override
+            public void onMapClick(LatLng point) {
+                // TODO Auto-generated method stub
+
+                //save current location
+                mLatLng = point;
+
+                List<Address> addresses = new ArrayList<>();
+                try {
+                    addresses = mGeocoder.getFromLocation(point.latitude, point.longitude,1);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+
+                android.location.Address address = addresses.get(0);
+
+                if (address != null) {
+                    if (address.getAddressLine(0) != null) {
+                        if (mEtOrigin.isFocused()) {
+                            mEtOrigin.setText(address.getAddressLine(0));
+                            mEtOrigin.setSelection(mEtOrigin.getText().length());
+                            com.example.paultikhonov.uklontestapp.model.Address address1 = new com.example.paultikhonov.uklontestapp.model.Address();
+                            address1.setAddressName(address.getAddressLine(0));
+                            AppDatabase.getAppDatabase(MapsActivity.this).addressDao().insertAll(address1);
+                        } else if (mEtDestination.isFocused()) {
+                            mEtDestination.setText(address.getAddressLine(0));
+                            mEtDestination.setSelection(mEtDestination.getText().length());
+                            com.example.paultikhonov.uklontestapp.model.Address address1 = new com.example.paultikhonov.uklontestapp.model.Address();
+                            address1.setAddressName(address.getAddressLine(0));
+                            AppDatabase.getAppDatabase(MapsActivity.this).addressDao().insertAll(address1);
+                        }
+                    }
+                }
+
+                //remove previously placed Marker
+                if (mMarker != null) {
+                    mMarker.remove();
+                }
+
+                //place marker where user just clicked
+                mMarker = mMap.addMarker(new MarkerOptions().position(point).title("Marker")
+                        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_MAGENTA)));
+            }
+        });
     }
 
     private void getDeviceLocation() {
@@ -175,31 +261,28 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         if (PermissionUtils.isPermissionGranted(permissions, results,
                 Manifest.permission.ACCESS_FINE_LOCATION)) {
             getDeviceLocation();
-
-        } else {
-
         }
     }
 
     @Override
     public void onDirectionFinderStart() {
-        progressDialog = ProgressDialog.show(this, "Please wait.",
-                "Finding direction..!", true);
+        mProgressDialog = ProgressDialog.show(this, getString(R.string.progress_dialog_title),
+                getString(R.string.progress_dialog_message), true);
 
-        if (originMarkers != null) {
-            for (Marker marker : originMarkers) {
+        if (mOriginMarkers != null) {
+            for (Marker marker : mOriginMarkers) {
                 marker.remove();
             }
         }
 
-        if (destinationMarkers != null) {
-            for (Marker marker : destinationMarkers) {
+        if (mDestinationMarkers != null) {
+            for (Marker marker : mDestinationMarkers) {
                 marker.remove();
             }
         }
 
-        if (polylinePaths != null) {
-            for (Polyline polyline:polylinePaths ) {
+        if (mPolylinePaths != null) {
+            for (Polyline polyline: mPolylinePaths ) {
                 polyline.remove();
             }
         }
@@ -207,21 +290,22 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     @Override
     public void onDirectionFinderSuccess(List<Route> routes) {
-        progressDialog.dismiss();
-        polylinePaths = new ArrayList<>();
-        originMarkers = new ArrayList<>();
-        destinationMarkers = new ArrayList<>();
+        mProgressDialog.dismiss();
+        mPolylinePaths = new ArrayList<>();
+        mOriginMarkers = new ArrayList<>();
+        mDestinationMarkers = new ArrayList<>();
 
         for (Route route : routes) {
             mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(route.startLocation, 16));
             ((TextView) findViewById(R.id.tvDuration)).setText(route.duration.text);
             ((TextView) findViewById(R.id.tvDistance)).setText(route.distance.text);
 
-            originMarkers.add(mMap.addMarker(new MarkerOptions()
+            mOriginMarkers.add(mMap.addMarker(new MarkerOptions()
                     .icon(BitmapDescriptorFactory.fromResource(R.drawable.start_blue))
                     .title(route.startAddress)
                     .position(route.startLocation)));
-            destinationMarkers.add(mMap.addMarker(new MarkerOptions()
+
+            mDestinationMarkers.add(mMap.addMarker(new MarkerOptions()
                     .icon(BitmapDescriptorFactory.fromResource(R.drawable.end_green))
                     .title(route.endAddress)
                     .position(route.endLocation)));
@@ -234,7 +318,28 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             for (int i = 0; i < route.points.size(); i++)
                 polylineOptions.add(route.points.get(i));
 
-            polylinePaths.add(mMap.addPolyline(polylineOptions));
+            mPolylinePaths.add(mMap.addPolyline(polylineOptions));
         }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+
+        if (data == null) {
+            return;
+        }
+
+        if (requestCode == ADDRESSES_LIST_ORIGIN_REQUEST_CODE) {
+            String address = data.getStringExtra(ADDRESSES_LIST_REQUEST_VALUE);
+            mEtOrigin.setText(address);
+            mEtOrigin.setSelection(address.length());
+        }
+
+        if (requestCode == ADDRESSES_LIST_DESTINATION_REQUEST_CODE) {
+            String address = data.getStringExtra(ADDRESSES_LIST_REQUEST_VALUE);
+            mEtDestination.setText(address);
+            mEtDestination.setSelection(address.length());
+        }
+
     }
 }
